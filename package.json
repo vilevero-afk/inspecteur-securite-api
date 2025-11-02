@@ -1,0 +1,31 @@
+{
+  "name": "inspecteur-securite-api",
+  "version": "1.0.0",
+  "description": "Serveur API pour Inspecteur Sécurité — génération de questionnaires, analyse IA et export PDF.",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "openai": "^4.55.4",
+    "pdf-lib": "^1.17.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "AI",
+    "sécurité",
+    "analyse",
+    "questionnaire",
+    "PDF",
+    "openai"
+  ],
+  "author": "Vincent Legrand",
+  "license": "MIT"
+}
