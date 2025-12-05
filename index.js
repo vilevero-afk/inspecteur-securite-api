@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 import bodyParser from "body-parser";
 import cors from "cors";
 import basicAuth from "express-basic-auth";
-import PDFDocument from "pdfkit"; // encore utilisé ailleurs si tu veux générer des PDF
+import PDFDocument from "pdfkit";
 import fs from "fs";
 import OpenAI from "openai";
 
@@ -17,20 +17,14 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// ===== Route de santé obligatoire pour Render =====
+// ===== Route de santé =====
 app.get("/healthz", (req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
 // ===== Auth =====
-if (
-  !process.env.AUTH_USER ||
-  !process.env.AUTH_PASS ||
-  !process.env.OPENAI_API_KEY
-) {
-  console.error(
-    "❌ Variables ENV manquantes (AUTH_USER / AUTH_PASS / OPENAI_API_KEY)"
-  );
+if (!process.env.AUTH_USER || !process.env.AUTH_PASS || !process.env.OPENAI_API_KEY) {
+  console.error("❌ Variables ENV manquantes (AUTH_USER / AUTH_PASS / OPENAI_API_KEY)");
   process.exit(1);
 }
 
@@ -52,9 +46,7 @@ app.post("/generate-questions", async (req, res) => {
     const { mode, context } = req.body;
 
     if (!mode || !context) {
-      return res
-        .status(400)
-        .json({ error: "Champs requis : mode, context" });
+      return res.status(400).json({ error: "Champs requis : mode, context" });
     }
 
     const count = mode === "iso" ? 30 : 20;
@@ -63,95 +55,53 @@ app.post("/generate-questions", async (req, res) => {
 Tu es un Conseiller en Prévention – Niveau 1 (Belgique), expert en :
 - Code du bien-être au travail
 - RGPT
-- Directives et normes européennes (dont ISO 45001)
-- Méthodologie Kinney (Probabilité × Fréquence × Gravité)
-- Analyse par arbre des causes
-- Hiérarchie des mesures de prévention (élimination, substitution, mesures techniques, organisationnelles, EPI)
+- ISO 45001
+- Méthode Kinney
+- Arbre des causes
+- Hiérarchie des mesures de prévention
 
-Contexte d'analyse des risques :
+Contexte :
 "${context}"
 
-Objectif :
-Générer un questionnaire professionnel d'analyse de risques pour différents types d'environnements (chantier, maintenance, logistique, bureaux, etc.).
+Génère EXACTEMENT ${count} questions professionnelles.
 
-EXIGENCES :
-- EXACTEMENT ${count} questions.
-- Questions orientées "analyse de risques" et "prévention", pas checklist gadget.
-- Intégrer :
-  - dangers (techniques, organisationnels, humains, environnementaux),
-  - organisation de la sécurité,
-  - coordination, sous-traitants, formation, procédures,
-  - mesures existantes et manquantes,
-  - conformité légale (Code BE, RGPT, directives UE).
-
-FORMAT STRICT EN JSON.
-Le JSON doit être un OBJET de la forme suivante :
-
+FORMAT STRICT EN JSON :
 {
   "questions": [
     {
       "id": 1,
-      "label": "Formule une question professionnelle et concrète",
-      "type": "bool" | "rate" | "text",
+      "label": "Question",
+      "type": "bool | rate | text",
       "category": "danger | organisation | EPI | prévention | environnement | technique",
-      "kinney": true | false,
-      "comment": "Brève indication sur ce que la question permet d'évaluer (Kinney, conformité, etc.)"
+      "kinney": true,
+      "comment": "but de la question"
     }
   ]
 }
 
-CONTRAINTES :
-- Pas d'autre texte que ce JSON.
-- Le JSON doit être 100% valide.
-- "type":
-    - "bool"   -> question Oui / Non
-    - "rate"   -> échelle de 1 à 5 (niveau de maîtrise, gravité, fréquence…)
-    - "text"   -> réponse libre (description dangers, mesures, causes, etc.)
+AUCUN TEXTE HORS JSON.
 `;
 
-    // 👉 Utilisation de chat.completions avec response_format JSON (SDK v4)
-    const completion = await openai.chat.completions.create({
+    // ======= NOUVELLE SYNTAXE : Responses API =======
+    const completion = await openai.responses.create({
       model: "gpt-4o-mini",
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content:
-            "Tu es un Conseiller en Prévention belge (niveau 1), spécialisé en analyse de risques et réglementation HSE.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
+      input: prompt,
+      output_format: { type: "json_object" }
     });
 
-    const rawContent = completion.choices[0].message.content;
+    const json = completion.output[0].content[0].json;
 
-    let parsed;
-    try {
-      parsed = JSON.parse(rawContent);
-    } catch (e) {
-      console.error("❌ JSON invalide renvoyé par l'IA :", rawContent);
-      return res
-        .status(500)
-        .json({ error: "Réponse IA non valide (JSON parse error)" });
+    const questions = json.questions;
+
+    if (!Array.isArray(questions)) {
+      console.error("❌ Questions invalides :", json);
+      return res.status(500).json({ error: "Format questions invalide" });
     }
 
-    // On accepte soit { questions: [...] } soit directement [...]
-    const questions = Array.isArray(parsed) ? parsed : parsed.questions;
-
-    if (!questions || !Array.isArray(questions)) {
-      console.error("❌ Format inattendu pour 'questions' :", parsed);
-      return res
-        .status(500)
-        .json({ error: "Format inattendu pour les questions IA" });
-    }
-
-    // ✅ On renvoie exactement comme ton frontend l'attend
     res.json({ questions });
+
   } catch (err) {
-    console.error("Erreur /generate-questions :", err);
+    console.error("❌ Erreur /generate-questions :", err);
     res.status(500).json({ error: "Erreur génération questionnaire" });
   }
 });
@@ -161,84 +111,47 @@ CONTRAINTES :
    ============================================================ */
 app.post("/analyse-ai", async (req, res) => {
   try {
-    const { context, answers, autoAnalysis } = req.body;
+    const { context, answers } = req.body;
 
     if (!context || !answers) {
-      return res
-        .status(400)
-        .json({ error: "Champs requis : context, answers" });
+      return res.status(400).json({ error: "Champs requis : context, answers" });
     }
 
     const prompt = `
-Tu es un Conseiller en Prévention – Niveau 1 (Belgique), expert en :
-- Code du bien-être au travail
-- RGPT
-- ISO 45001
-- Méthode Kinney
-- Arbre des causes
-- Hiérarchie européenne des mesures de prévention.
+Tu es un Conseiller en Prévention – Niveau 1 (Belgique).
 
 Contexte :
 "${context}"
 
-Réponses au questionnaire (JSON) :
+Réponses :
 ${JSON.stringify(answers, null, 2)}
 
-Tâche :
-Produire un rapport professionnel complet d'analyse de risques, structuré comme pour un rapport officiel HSE.
+Produit un rapport HSE structuré :
 
-STRUCTURE OBLIGATOIRE DU RAPPORT :
-
-1. Contexte synthétique
+1. Contexte
 2. Dangers identifiés
-   - Liste des dangers par famille (technique, organisation, humain, environnement, EPI…)
-3. Évaluation du risque
-   - Utilise la méthode Kinney : Probabilité (P), Fréquence (F), Gravité (G), Score (P×F×G)
-   - Classe le risque selon une matrice de risque (Faible, Moyen, Élevé, Très élevé)
-4. Analyse par arbre des causes
-   - Causes immédiates
-   - Causes profondes / organisationnelles
-5. Analyse de conformité légale
-   - Références au Code du bien-être au travail
-   - Références RGPT si pertinent
-   - Références à des exigences européennes / ISO 45001
-6. Mesures existantes
-   - Ce qui est déjà en place et son efficacité
-7. Plan d'action hiérarchisé (automatique)
-   Présente un tableau (texte) avec pour chaque action :
-   - Action à mettre en place
-   - Type de mesure : Élimination / Substitution / Technique / Organisationnelle / EPI
-   - Responsable
-   - Délai
-   - Priorité (Haute / Moyenne / Basse)
-   - Référence légale associée (Code BE / RGPT / directive…)
-8. Conclusion professionnelle
-   - Risque résiduel
-   - Recommandations finales du Conseiller en Prévention.
+3. Évaluation Kinney (P/F/G + Score)
+4. Matrice de risque belge
+5. Arbre des causes
+6. Analyse de conformité légale (Code BE, RGPT, ISO 45001)
+7. Mesures existantes
+8. Plan d’action (action | type | responsable | délai | priorité | base légale)
+9. Conclusion (risque résiduel)
 
-Contraintes :
-- Réponse en TEXTE clair, structuré par sections numérotées.
-- Pas de JSON dans la réponse finale.
-- Style : professionnel, objectif, orienté document HSE.
+Réponse : texte uniquement, format rapport professionnel.
 `;
 
-    const completion = await openai.chat.completions.create({
+    const completion = await openai.responses.create({
       model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content:
-            "Tu rédiges des rapports d'analyse de risques comme un Conseiller en Prévention belge niveau 1.",
-        },
-        { role: "user", content: prompt },
-      ],
+      input: prompt
     });
 
-    const report = completion.choices[0].message.content;
+    const report = completion.output_text;
 
     res.json({ report });
+
   } catch (error) {
-    console.error("Erreur /analyse-ai :", error);
+    console.error("❌ Erreur /analyse-ai :", error);
     res.status(500).json({ error: "Erreur IA" });
   }
 });
