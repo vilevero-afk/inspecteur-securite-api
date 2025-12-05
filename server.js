@@ -1,3 +1,8 @@
+// =========================================
+// Inspecteur Sécurité — Backend Render
+// Version complète avec /generate-questions
+// =========================================
+
 import express from "express";
 import dotenv from "dotenv";
 import bodyParser from "body-parser";
@@ -12,17 +17,18 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ===== Route de santé obligatoire pour Render =====
-app.get("/healthz", (req, res) => {
-  res.status(200).json({ status: "ok" });
-});
-
-// ===== Auth =====
+// --- Vérification des variables d’environnement ---
 if (!process.env.AUTH_USER || !process.env.AUTH_PASS || !process.env.OPENAI_API_KEY) {
   console.error("❌ Variables ENV manquantes (AUTH_USER / AUTH_PASS / OPENAI_API_KEY)");
   process.exit(1);
 }
 
+// --- Route publique ---
+app.get("/healthz", (req, res) => {
+  res.status(200).json({ status: "ok", message: "Serveur opérationnel" });
+});
+
+// --- Auth obligatoire ---
 app.use(
   basicAuth({
     users: { [process.env.AUTH_USER]: process.env.AUTH_PASS },
@@ -33,7 +39,9 @@ app.use(
 app.use(cors());
 app.use(bodyParser.json());
 
-// ===== Route : Generate Questions =====
+// =========================================
+// 🟦 ROUTE : GENERATE QUESTIONS
+// =========================================
 app.post("/generate-questions", async (req, res) => {
   try {
     const { mode, context } = req.body;
@@ -48,11 +56,12 @@ app.post("/generate-questions", async (req, res) => {
 Génère exactement ${count} questions de sécurité pour une analyse ${mode}.
 Contexte : ${context}
 
-Répond STRICTEMENT en JSON :
+Renvoie STRICTEMENT un JSON comme ceci :
+
 [
-  {"id": 1, "label": "Exemple", "type": "bool"},
-  {"id": 2, "label": "Exemple", "type": "rate"},
-  {"id": 3, "label": "Exemple", "type": "text"}
+  {"id": 1, "label": "La zone est-elle protégée ?", "type": "bool"},
+  {"id": 2, "label": "Évaluez le risque de chute", "type": "rate"},
+  {"id": 3, "label": "Décrivez les mesures existantes", "type": "text"}
 ]
     `;
 
@@ -64,17 +73,19 @@ Répond STRICTEMENT en JSON :
     });
 
     const output = completion.choices[0].message.content.trim();
+
     const json = JSON.parse(output);
 
     res.json({ questions: json });
-
   } catch (err) {
     console.error("Erreur /generate-questions :", err);
     res.status(500).json({ error: "Erreur génération questionnaire" });
   }
 });
 
-// ===== Route : Analyse PDF =====
+// =========================================
+// 🟦 ROUTE : ANALYSE IA
+// =========================================
 app.post("/analyse-text", async (req, res) => {
   try {
     const { text } = req.body;
@@ -97,7 +108,37 @@ app.post("/analyse-text", async (req, res) => {
   }
 });
 
-// ===== Start server =====
+// =========================================
+// 🟦 ROUTE : GENERATE PDF
+// =========================================
+app.post("/generate-pdf", (req, res) => {
+  try {
+    const { content, title } = req.body;
+
+    const fileName = `rapport_${Date.now()}.pdf`;
+    const filePath = `/tmp/${fileName}`;
+
+    const doc = new PDFDocument();
+    const stream = fs.createWriteStream(filePath);
+
+    doc.pipe(stream);
+    doc.fontSize(20).text(title || "Rapport Sécurité", { align: "center" });
+    doc.moveDown();
+    doc.fontSize(14).text(content);
+    doc.end();
+
+    stream.on("finish", () => {
+      res.download(filePath, fileName, () => fs.unlinkSync(filePath));
+    });
+  } catch (err) {
+    console.error("Erreur PDF :", err);
+    res.status(500).json({ error: "Erreur génération PDF" });
+  }
+});
+
+// =========================================
+// 🚀 Démarrage serveur
+// =========================================
 app.listen(PORT, () => {
-  console.log(`🚀 Serveur Inspecteur Sécurité API actif sur port ${PORT}`);
+  console.log(`Serveur Inspecteur Sécurité actif sur port ${PORT}`);
 });
