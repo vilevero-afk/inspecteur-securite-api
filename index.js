@@ -10,7 +10,7 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// -------- HEALTH CHECK --------
+// -------- HEALTH --------
 app.get("/healthz", (req, res) => {
   res.status(200).json({ status: "ok" });
 });
@@ -26,7 +26,6 @@ app.use(
 app.use(cors());
 app.use(bodyParser.json());
 
-// -------- OpenAI --------
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 
@@ -42,35 +41,43 @@ app.post("/generate-questions", async (req, res) => {
     const count = mode === "iso" ? 30 : 20;
 
     const prompt = `
-Génère exactement ${count} questions de sécurité.
-Contexte : ${context}
+GENÈRE UNE RÉPONSE STRICTEMENT AU FORMAT JSON.
 
-Format de réponse attendu :
+Exemple de format JSON attendu :
 {
   "questions": [
-    { "id": "q1", "label": "...", "type": "bool" },
-    { "id": "q2", "label": "...", "type": "rate" }
+    { "id": "q1", "label": "Question ?", "type": "bool" }
   ]
 }
+
+Génère exactement ${count} questions adaptées au contexte suivant :
+"${context}"
+Mode : ${mode}
+
+Répond UNIQUEMENT en JSON valide.
 `;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      response_format: { type: "json_object" }   // 🔥 OBLIGE GPT à renvoyer du JSON VALIDE
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "user",
+          content: prompt
+        }
+      ]
     });
 
-    const data = completion.choices[0].message.content;
+    const jsonText = completion.choices[0].message.content;
+    console.log("Réponse OpenAI :", jsonText);
 
-    console.log("JSON OpenAI reçu :", data);
-
-    const parsed = JSON.parse(data);
+    const parsed = JSON.parse(jsonText);
 
     res.json(parsed);
 
   } catch (err) {
     console.error("Erreur /generate-questions :", err);
-    res.status(500).json({ error: "Erreur serveur lors de la génération des questions" });
+    res.status(500).json({ error: "Erreur serveur lors de la génération" });
   }
 });
 
@@ -79,10 +86,6 @@ Format de réponse attendu :
 app.post("/analyse-ai", async (req, res) => {
   try {
     const { context, answers, autoAnalysis } = req.body;
-
-    if (!context || !answers) {
-      return res.status(400).json({ error: "context et answers requis" });
-    }
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -94,7 +97,7 @@ app.post("/analyse-ai", async (req, res) => {
 Contexte : ${context}
 Réponses : ${JSON.stringify(answers)}
 
-Fais une analyse claire et concise :
+Analyse les réponses de façon structurée.
 ${autoAnalysis}
 `
         }
@@ -103,8 +106,8 @@ ${autoAnalysis}
 
     res.json({ report: completion.choices[0].message.content });
 
-  } catch (error) {
-    console.error("Erreur /analyse-ai :", error);
+  } catch (e) {
+    console.error("Erreur /analyse-ai :", e);
     res.status(500).json({ error: "Erreur IA" });
   }
 });
