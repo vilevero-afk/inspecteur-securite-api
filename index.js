@@ -1,7 +1,7 @@
 import express from "express";
 import dotenv from "dotenv";
-import cors from "cors";
 import bodyParser from "body-parser";
+import cors from "cors";
 import basicAuth from "express-basic-auth";
 import OpenAI from "openai";
 
@@ -10,16 +10,19 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ===== Client OpenAI =====
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// ====== HEALTH CHECK ======
-app.get("/healthz", (req, res) => res.json({ status: "ok" }));
+// ===== Health check =====
+app.get("/healthz", (req, res) => {
+  res.status(200).json({ status: "ok" });
+});
 
-// ====== AUTH ======
+// ===== Auth =====
 if (!process.env.AUTH_USER || !process.env.AUTH_PASS || !process.env.OPENAI_API_KEY) {
-  console.error("❌ Variables d’environnement manquantes");
+  console.error("❌ Variables ENV manquantes");
   process.exit(1);
 }
 
@@ -34,7 +37,7 @@ app.use(cors());
 app.use(bodyParser.json());
 
 /* ============================================================
-   🔵 GENERATE QUESTIONS — chat.completions
+   🔵 GENERATE QUESTIONS — **VERSION FINALE FONCTIONNELLE**
    ============================================================ */
 app.post("/generate-questions", async (req, res) => {
   try {
@@ -47,55 +50,59 @@ app.post("/generate-questions", async (req, res) => {
     const count = mode === "iso" ? 30 : 20;
 
     const prompt = `
-Tu es un conseiller en prévention belge.
-Génère EXACTEMENT ${count} questions d'analyse de risques.
-FORMAT STRICT JSON :
+Tu es un Conseiller en Prévention (Belgique, niveau 1),
+expert en :
+- Code du Bien-être au travail
+- RGPT
+- ISO 45001
+- Méthode Kinney (P × F × G)
+- Hiérarchie des mesures de prévention
+- Analyse par arbre des causes
 
+Contexte :
+"${context}"
+
+Génère EXACTEMENT ${count} questions professionnelles d'analyse de risques.
+
+FORMAT STRICT JSON :
 {
   "questions": [
     {
       "id": 1,
-      "label": "Question",
-      "type": "bool | rate | text",
-      "category": "danger | organisation | EPI | technique | prévention | environnement",
+      "label": "formulation professionnelle",
+      "type": "bool" | "rate" | "text",
+      "category": "danger | technique | organisation | EPI | environnement | prévention",
       "kinney": true,
-      "comment": "But de la question"
+      "comment": "explication du but"
     }
   ]
 }
 
-Aucun texte hors JSON.
-Contexte : "${context}"
+AUCUN TEXTE en dehors du JSON.
 `;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
+      response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: "Tu es un expert HSE." },
+        { role: "system", content: "Tu génères des questionnaires HSE professionnels." },
         { role: "user", content: prompt }
       ]
     });
 
-    const content = completion.choices[0].message.content;
+    const raw = completion.choices[0].message.content;
+    const data = JSON.parse(raw);
 
-    let parsed;
-    try {
-      parsed = JSON.parse(content);
-    } catch (e) {
-      console.error("❌ JSON invalide :", content);
-      return res.status(500).json({ error: "JSON IA invalide" });
-    }
-
-    res.json({ questions: parsed.questions });
+    res.json({ questions: data.questions });
 
   } catch (err) {
-    console.error("❌ Erreur /generate-questions:", err);
-    res.status(500).json({ error: "Erreur serveur" });
+    console.error("❌ Erreur generate-questions :", err);
+    res.status(500).json({ error: "Erreur génération questionnaire" });
   }
 });
 
 /* ============================================================
-   🟩 ANALYSE IA — chat.completions
+   🟩 ANALYSE IA — VERSION FINALE
    ============================================================ */
 app.post("/analyse-ai", async (req, res) => {
   try {
@@ -106,41 +113,53 @@ app.post("/analyse-ai", async (req, res) => {
     }
 
     const prompt = `
-Tu es conseiller en prévention niveau 1.
-Produis un rapport HSE professionnel :
+Tu es un Conseiller en Prévention niveau 1 (Belgique).
+
+Analyse les réponses au questionnaire pour :
+"${context}"
+
+Réponses :
+${JSON.stringify(answers, null, 2)}
+
+Produit un rapport professionnel structuré :
 
 1. Contexte
-2. Dangers
-3. Kinney
-4. Matrice risque
+2. Dangers identifiés
+3. Analyse Kinney (P/F/G, Score)
+4. Matrice de risque belge
 5. Arbre des causes
-6. Conformité légale
+6. Conformité légale (Code BE, RGPT, directives EU, ISO 45001)
 7. Mesures existantes
-8. Plan d'action
+8. Plan d’action structuré :
+   - Action
+   - Type (Élimination / Substitution / Technique / Organisationnelle / EPI)
+   - Responsable
+   - Délai
+   - Priorité
+   - Référence légale
 9. Conclusion
 
-Réponses : ${JSON.stringify(answers)}
+Réponse : texte clair, sans JSON.
 `;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: "Rapports HSE professionnels uniquement." },
+        { role: "system", content: "Tu rédiges des rapports HSE professionnels." },
         { role: "user", content: prompt }
       ]
     });
 
-    res.json({ report: completion.choices[0].message.content });
+    const report = completion.choices[0].message.content;
+
+    res.json({ report });
 
   } catch (error) {
-    console.error("❌ Erreur /analyse-ai:", error);
+    console.error("❌ Erreur analyse-ai :", error.message);
     res.status(500).json({ error: "Erreur IA" });
   }
 });
 
-/* ============================================================
-   START SERVER
-   ============================================================ */
 app.listen(PORT, () => {
-  console.log(`🚀 API Inspecteur Sécurité en ligne sur port ${PORT}`);
+  console.log(`🚀 API Inspecteur Sécurité active sur port ${PORT}`);
 });
