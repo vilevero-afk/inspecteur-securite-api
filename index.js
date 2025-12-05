@@ -42,8 +42,9 @@ app.use(
 app.use(cors());
 app.use(bodyParser.json());
 
+
 /* ============================================================
-   🔵 1) ROUTE : GENERATE QUESTIONS (chat.completions)
+   🔵 1) ROUTE : GENERATE QUESTIONS (CORRIGÉE)
    ============================================================ */
 app.post("/generate-questions", async (req, res) => {
   try {
@@ -56,56 +57,53 @@ app.post("/generate-questions", async (req, res) => {
     const count = mode === "iso" ? 30 : 20;
 
     const prompt = `
-Tu es un Conseiller en Prévention – Niveau 1 (Belgique), expert HSE.
+Tu es un Conseiller en Prévention – Niveau 1 en Belgique, expert en :
+- Code du bien-être au travail
+- RGPT
+- ISO 45001
+- Kinney
+- Arbre des causes
+- Hiérarchie des mesures de prévention
 
 Contexte :
 "${context}"
 
 Génère EXACTEMENT ${count} questions professionnelles.
 
-FORMAT STRICT :
+FORMAT STRICT JSON OBJET :
 {
   "questions": [
     {
       "id": 1,
-      "label": "Question précise et professionnelle",
+      "label": "Formulation professionnelle",
       "type": "bool | rate | text",
       "category": "danger | organisation | EPI | prévention | environnement | technique",
       "kinney": true,
-      "comment": "But de l’évaluation"
+      "legal": "référence RGPT / Code BE / ISO",
+      "action_type": "élimination | substitution | technique | organisationnelle | EPI",
+      "comment": "objectif de la question"
     }
   ]
 }
 
-Aucun texte hors JSON.
+AUCUN TEXTE HORS JSON.
 `;
 
-    // ===== Utilisation correcte : chat.completions avec response_format =====
-    const completion = await openai.chat.completions.create({
+    // ===== API correcte : Responses API (OpenAI V4) =====
+    const completion = await openai.responses.create({
       model: "gpt-4o-mini",
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: "Tu es un conseiller en prévention belge niveau 1." },
-        { role: "user", content: prompt }
-      ]
+      input: prompt,
+      format: "json"   // ✔ LA bonne option (ancien output_format était invalide)
     });
 
-    const raw = completion.choices[0].message.content;
+    const json = completion.output[0].content[0].json;
 
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (e) {
-      console.error("❌ JSON fourni par l’IA est invalide :", raw);
-      return res.status(500).json({ error: "Erreur JSON IA" });
+    if (!json?.questions || !Array.isArray(json.questions)) {
+      console.error("❌ JSON invalide :", json);
+      return res.status(500).json({ error: "Format questions invalide" });
     }
 
-    if (!parsed.questions || !Array.isArray(parsed.questions)) {
-      console.error("❌ Format inattendu :", parsed);
-      return res.status(500).json({ error: "Format inattendu (questions)" });
-    }
-
-    res.json({ questions: parsed.questions });
+    res.json({ questions: json.questions });
 
   } catch (err) {
     console.error("❌ Erreur /generate-questions :", err);
@@ -113,8 +111,9 @@ Aucun texte hors JSON.
   }
 });
 
+
 /* ============================================================
-   🟩 2) ROUTE : ANALYSE IA (chat.completions)
+   🟩 2) ROUTE : ANALYSE IA (inchangée)
    ============================================================ */
 app.post("/analyse-ai", async (req, res) => {
   try {
@@ -138,11 +137,11 @@ Produit un rapport officiel HSE structuré :
 1. Contexte
 2. Dangers identifiés
 3. Évaluation Kinney (P/F/G + Score)
-4. Matrice de risque belge (faible / moyen / important / critique)
+4. Matrice de risque belge
 5. Arbre des causes
 6. Conformité légale (Code BE, RGPT, ISO 45001)
 7. Mesures existantes
-8. Plan d’action (action | type | responsable | délai | base légale)
+8. Plan d’action
 9. Conclusion (risque résiduel)
 
 Réponse : texte uniquement, format rapport professionnel.
@@ -165,6 +164,7 @@ Réponse : texte uniquement, format rapport professionnel.
     res.status(500).json({ error: "Erreur IA" });
   }
 });
+
 
 // ===== Start server =====
 app.listen(PORT, () => {
