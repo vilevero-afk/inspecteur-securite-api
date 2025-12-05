@@ -12,7 +12,7 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ===== Route de santé obligatoire pour Render =====
+// ===== Route de santé pour Render =====
 app.get("/healthz", (req, res) => {
   res.status(200).json({ status: "ok" });
 });
@@ -33,8 +33,10 @@ app.use(
 app.use(cors());
 app.use(bodyParser.json());
 
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
 /* ============================================================
-   🔵 1) ROUTE : GENERATE QUESTIONS (NOUVEAU PROMPT PRO)
+   🔵 1) ROUTE : GENERATE QUESTIONS
    ============================================================ */
 app.post("/generate-questions", async (req, res) => {
   try {
@@ -47,59 +49,54 @@ app.post("/generate-questions", async (req, res) => {
     const count = mode === "iso" ? 30 : 20;
 
     const prompt = `
-Tu es un Conseiller en Prévention – Niveau 1, expert en sécurité, législation belge (Code du Bien-être, RGPT), normes européennes et méthodologies HSE.
+Tu es un Conseiller en Prévention Niveau 1 (Belgique), expert en sécurité du travail, RGPT, Code du Bien-être, normes EU, ISO 45001.
 
-Ta tâche :
-Générer un questionnaire professionnel d’analyse de risques relatif au contexte suivant :
-« ${context} »
-
-Exigences professionnelles :
-- Méthode Kinney (Probabilité × Fréquence × Gravité)
+Génère un questionnaire professionnel d’analyse de risques basé sur :
+- Méthode Kinney (P × F × G)
 - Arbre des causes
-- Hiérarchie européenne des mesures de prévention
-- Code du Bien-être au travail (Belgique)
-- RGPT (travaux en hauteur si applicable)
-- Bonnes pratiques ISO 45001
+- Hiérarchie des mesures de prévention
+- Obligations légales belges et européennes
+- Pratiques HSE réelles
 
-Format strict en JSON :
+Contexte : "${context}"
+Type d’analyse : ${mode}
+
+Génère EXACTEMENT ${count} questions.
+
+FORMAT STRICT EN JSON UNIQUEMENT :
 [
   {
-    "id": 1,
-    "label": "Question professionnelle obligatoire",
+    "id": "q1",
+    "label": "Question…",
     "type": "bool | rate | text",
     "category": "danger | organisation | EPI | prévention | environnement | technique",
-    "kinney": true | false
+    "kinney": true
   }
 ]
+Aucun texte hors JSON.
+    `;
 
-Contraintes :
-- EXACTEMENT ${count} questions.
-- Le JSON doit être 100% valide.
-- Pas de texte en dehors du JSON.
-`;
-
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-    const completion = await openai.responses.create({
+    const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      input: prompt,
-      response_format: { type: "json_object" }
+      messages: [{ role: "user", content: prompt }],
+      response: { format: "json" } // NOUVEAU FORMAT OPENAI
     });
 
-    const result = completion.output[0].content[0].json;
+    const content = completion.choices[0].message.content;
 
-    res.json({ questions: result });
+    // Parser le JSON généré
+    const questions = JSON.parse(content);
+
+    res.json({ questions });
 
   } catch (err) {
-    console.error("Erreur /generate-questions :", err);
-    res.status(500).json({ error: "Erreur génération questionnaire" });
+    console.error("❌ Erreur /generate-questions :", err);
+    res.status(500).json({ error: "Erreur génération questionnaire : " + err.message });
   }
 });
 
-
-
 /* ============================================================
-   🟩 2) ROUTE : ANALYSE IA (PRO + STRUCTURÉE)
+   🟩 2) ROUTE : ANALYSE IA
    ============================================================ */
 app.post("/analyse-ai", async (req, res) => {
   try {
@@ -110,45 +107,42 @@ app.post("/analyse-ai", async (req, res) => {
     }
 
     const prompt = `
-Tu es un Conseiller en Prévention – Niveau 1 (Belgique), expert en analyse de risques, RGPT, Code du Bien-être au travail, ISO 45001 et méthodologie Kinney.
+Tu es un Conseiller en Prévention Niveau 1 belge.
+Analyse professionnelle complète basée sur :
 
-Analyse les réponses suivantes :
+- Identification des dangers
+- Méthode Kinney (P, F, G, Score)
+- Arbre des causes
+- Conformité légale (Code du Bien-être, RGPT, normes EU)
+- Mesures existantes et conformité
+- Mesures correctives classées selon la hiérarchie des mesures
+- Plan d’action : Action | Responsable | Délai | Obligation légale
+- Conclusion professionnelle
+
 Contexte : "${context}"
-Réponses : ${JSON.stringify(answers)}
+Réponses du questionnaire : ${JSON.stringify(answers)}
 
-Produit un rapport professionnel structuré :
+Produit un rapport clair destiné à un document officiel HSE.
+PAS DE JSON, uniquement du texte structuré.
+    `;
 
-1. Dangers identifiés
-2. Évaluation Kinney (P, F, G, Score)
-3. Arbre des causes
-4. Analyse légale (Code BE, RGPT, normes EU)
-5. Mesures existantes et conformité
-6. Mesures correctives classées selon la hiérarchie
-7. Plan d’action : Action | Responsable | Délais | Obligation légale
-8. Conclusion professionnelle (risque résiduel)
-
-Le rapport doit être un texte clair et destiné à un rapport officiel en HSE.
-
-Texte uniquement, pas de JSON.
-`;
-
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-    const completion = await openai.responses.create({
+    const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      input: prompt
+      messages: [
+        { role: "system", content: "Tu es un expert belge en prévention et sécurité du travail." },
+        { role: "user", content: prompt }
+      ]
     });
 
-    const report = completion.output_text;
+    const report = completion.choices[0].message.content;
 
     res.json({ report });
 
   } catch (error) {
-    console.error("Erreur /analyse-ai :", error);
-    res.status(500).json({ error: "Erreur IA" });
+    console.error("❌ Erreur /analyse-ai :", error);
+    res.status(500).json({ error: "Erreur IA : " + error.message });
   }
 });
-
 
 // ===== Start server =====
 app.listen(PORT, () => {
