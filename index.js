@@ -10,18 +10,25 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ===== Client OpenAI =====
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// ===== Health check =====
+// ======================================================
+// HEALTH CHECK
+// ======================================================
 app.get("/healthz", (req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
-// ===== Auth =====
-if (!process.env.AUTH_USER || !process.env.AUTH_PASS || !process.env.OPENAI_API_KEY) {
+// ======================================================
+// AUTH
+// ======================================================
+if (
+  !process.env.AUTH_USER ||
+  !process.env.AUTH_PASS ||
+  !process.env.OPENAI_API_KEY
+) {
   console.error("❌ Variables ENV manquantes");
   process.exit(1);
 }
@@ -36,130 +43,174 @@ app.use(
 app.use(cors());
 app.use(bodyParser.json());
 
-/* ============================================================
-   🔵 GENERATE QUESTIONS — **VERSION FINALE FONCTIONNELLE**
-   ============================================================ */
-app.post("/generate-questions", async (req, res) => {
-  try {
-    const { mode, context } = req.body;
-
-    if (!mode || !context) {
-      return res.status(400).json({ error: "Champs requis : mode, context" });
-    }
-
-    const count = mode === "iso" ? 30 : 20;
-
-    const prompt = `
-Tu es un Conseiller en Prévention (Belgique, niveau 1),
-expert en :
-- Code du Bien-être au travail
+// ======================================================
+// PROMPT PROFESSIONNEL — GÉNÉRATION QUESTIONNAIRE
+// ======================================================
+function buildQuestionPrompt(context, count) {
+  return `
+Tu es Conseiller en Prévention Niveau 1 en Belgique.
+Tu appliques strictement :
 - RGPT
-- ISO 45001
-- Méthode Kinney (P × F × G)
-- Hiérarchie des mesures de prévention
-- Analyse par arbre des causes
+- Code du Bien-être au travail
+- Norme ISO 45001
+- Analyse dynamique des risques (CP Niveau 1)
+- Méthodes : Kinney – Arbre des causes – AMDEC – 5M – Bow-Tie – SOBANE/Déparis
 
-Contexte :
+🎯 OBJECTIF :
+Générer EXACTEMENT ${count} questions *spécifiques au contexte suivant* :
 "${context}"
 
-Génère EXACTEMENT ${count} questions professionnelles d'analyse de risques.
+🎯 EXIGENCE MAJEURE :
+Tu dois choisir automatiquement **la meilleure méthodologie d'analyse de risque** selon le contexte :
+- Risques mécaniques → Méthode Kinney
+- Risques procéduraux / défaillances → AMDEC
+- Risques humains / organisationnels → 5M
+- Accident ou incident décrit → Arbre des causes + Bow-Tie
+- Travail en hauteur → Hiérarchie des mesures de prévention + RGPT
+- Environnement / ergonomie → SOBANE / Déparis
+
+⚠️ CONTRAINTES IMPORTANTES :
+- Aucune réponse pré-remplie
+- Aucune valeur par défaut
+- Pas de texte hors JSON
+- Questions obligatoirement professionnelles et techniques
+- Le questionnaire doit ressembler à celui produit par un CP Niveau 1 en Belgique
 
 FORMAT STRICT JSON :
 {
   "questions": [
     {
       "id": 1,
-      "label": "formulation professionnelle",
-      "type": "bool" | "rate" | "text",
+      "label": "Question HSE précise",
+      "type": "bool | rate | text",
       "category": "danger | technique | organisation | EPI | environnement | prévention",
+      "method": "Kinney | 5M | AMDEC | Arbre des causes | Bow-Tie | Déparis | autre",
       "kinney": true,
-      "comment": "explication du but"
+      "comment": "Objectif professionnel de la question"
     }
   ]
 }
 
-AUCUN TEXTE en dehors du JSON.
+Aucun texte hors JSON.
 `;
+}
+
+// ======================================================
+// ROUTE : GÉNÉRATION DES QUESTIONS
+// ======================================================
+app.post("/generate-questions", async (req, res) => {
+  try {
+    const { mode, context } = req.body;
+    if (!mode || !context) {
+      return res
+        .status(400)
+        .json({ error: "Champs requis : mode, context" });
+    }
+
+    const count = mode === "iso" ? 30 : 20;
+    const prompt = buildQuestionPrompt(context, count);
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-5.1",
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: "Tu génères des questionnaires HSE professionnels." },
-        { role: "user", content: prompt }
-      ]
+        {
+          role: "system",
+          content:
+            "Tu génères des questionnaires HSE avancés, niveau Conseiller en Prévention Niveau 1 en Belgique.",
+        },
+        { role: "user", content: prompt },
+      ],
     });
 
-    const raw = completion.choices[0].message.content;
-    const data = JSON.parse(raw);
+    const parsed = JSON.parse(completion.choices[0].message.content);
 
-    res.json({ questions: data.questions });
+    if (!parsed.questions || !Array.isArray(parsed.questions)) {
+      console.error("❌ Format JSON inattendu :", parsed);
+      return res.status(500).json({ error: "Format JSON incorrect" });
+    }
 
+    return res.json({ questions: parsed.questions });
   } catch (err) {
-    console.error("❌ Erreur generate-questions :", err);
-    res.status(500).json({ error: "Erreur génération questionnaire" });
+    console.error("❌ Erreur /generate-questions :", err);
+    res.status(500).json({ error: "Erreur backend /generate-questions" });
   }
 });
 
-/* ============================================================
-   🟩 ANALYSE IA — VERSION FINALE
-   ============================================================ */
+// ======================================================
+// PROMPT PROFESSIONNEL — ANALYSE IA
+// ======================================================
+function buildAnalysisPrompt(context, answers) {
+  return `
+Tu es Conseiller en Prévention Niveau 1 en Belgique.
+Analyse les réponses selon :
+
+- RGPT
+- Code du Bien-être au travail
+- ISO 45001
+- Méthode Kinney (P × F × G)
+- AMDEC (Gravité / Occurrence / Détection)
+- Méthode des 5M
+- Bow-Tie
+- Hiérarchie des mesures de prévention
+- Analyse comportementale & organisationnelle
+
+CONTEXTE :
+${context}
+
+RÉPONSES :
+${JSON.stringify(answers, null, 2)}
+
+🎯 PRODUIS UN RAPPORT STRUCTURÉ :
+1. Analyse du contexte
+2. Identification des dangers (catégorisés)
+3. Sélection automatique de la meilleure méthode d’analyse
+4. Analyse technique (Kinney, 5M, Bow-Tie, AMDEC…)
+5. Conformité légale + références belges (Code du Bien-être, RGPT, directives EU, ISO 45001)
+6. Priorisation du risque (critique / majeur / modéré / faible)
+7. Plan d’actions correctives hiérarchisé
+8. Mesures immédiates, correctives et préventives
+9. Conclusion professionnelle
+
+Le rapport doit être clair, structuré, lisible par un HSE manager.
+`;
+}
+
+// ======================================================
+// ROUTE : ANALYSE IA
+// ======================================================
 app.post("/analyse-ai", async (req, res) => {
   try {
     const { context, answers } = req.body;
 
     if (!context || !answers) {
-      return res.status(400).json({ error: "Champs requis : context, answers" });
+      return res.status(400).json({ error: "Champs requis" });
     }
 
-    const prompt = `
-Tu es un Conseiller en Prévention niveau 1 (Belgique).
-
-Analyse les réponses au questionnaire pour :
-"${context}"
-
-Réponses :
-${JSON.stringify(answers, null, 2)}
-
-Produit un rapport professionnel structuré :
-
-1. Contexte
-2. Dangers identifiés
-3. Analyse Kinney (P/F/G, Score)
-4. Matrice de risque belge
-5. Arbre des causes
-6. Conformité légale (Code BE, RGPT, directives EU, ISO 45001)
-7. Mesures existantes
-8. Plan d’action structuré :
-   - Action
-   - Type (Élimination / Substitution / Technique / Organisationnelle / EPI)
-   - Responsable
-   - Délai
-   - Priorité
-   - Référence légale
-9. Conclusion
-
-Réponse : texte clair, sans JSON.
-`;
+    const prompt = buildAnalysisPrompt(context, answers);
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-5.1",
       messages: [
-        { role: "system", content: "Tu rédiges des rapports HSE professionnels." },
-        { role: "user", content: prompt }
-      ]
+        {
+          role: "system",
+          content:
+            "Tu rédiges des rapports HSE professionnels (niveau CP1 Belgique).",
+        },
+        { role: "user", content: prompt },
+      ],
     });
 
-    const report = completion.choices[0].message.content;
-
-    res.json({ report });
-
+    res.json({ report: completion.choices[0].message.content });
   } catch (error) {
-    console.error("❌ Erreur analyse-ai :", error.message);
-    res.status(500).json({ error: "Erreur IA" });
+    console.error("❌ Erreur /analyse-ai :", error);
+    res.status(500).json({ error: "Erreur IA backend" });
   }
 });
 
+// ======================================================
+// START SERVER
+// ======================================================
 app.listen(PORT, () => {
   console.log(`🚀 API Inspecteur Sécurité active sur port ${PORT}`);
 });
