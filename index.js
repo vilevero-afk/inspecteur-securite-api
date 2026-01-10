@@ -4,10 +4,15 @@ const cors = require("cors");
 const bodyParser = require("body-parser");
 const OpenAI = require("openai");
 
+// ✅ IMPORT EXPLICITE
 const { getPrompt } = require("./prompts/index.js");
 console.log("✅ typeof getPrompt =", typeof getPrompt);
 
 const app = express();
+
+// ==========================================================
+// MIDDLEWARES
+// ==========================================================
 app.use(cors());
 app.use(bodyParser.json({ limit: "10mb" }));
 
@@ -19,12 +24,11 @@ const client = new OpenAI({
 });
 
 // ==========================================================
-// ROUTE HEALTHCHECK
+// HEALTHCHECK
 // ==========================================================
 app.get("/health", (req, res) => {
   res.json({
     ok: true,
-    service: "inspecteur-securite-api",
     status: "running",
     time: new Date().toISOString(),
     node: process.version,
@@ -32,7 +36,7 @@ app.get("/health", (req, res) => {
 });
 
 // ==========================================================
-// ROUTE ANALYSE IA
+// ANALYSE IA
 // ==========================================================
 app.post("/analyse-ai", async (req, res) => {
   try {
@@ -56,24 +60,28 @@ app.post("/analyse-ai", async (req, res) => {
       temperature: 0.2,
     });
 
-    const rawContent = completion.choices[0].message.content;
+    const raw = completion.choices[0].message.content;
 
     if (analysisType === "kinney") {
-      return res.json({ report: JSON.parse(rawContent) });
+      const parsed = JSON.parse(raw);
+      return res.json({ report: parsed });
     }
 
-    return res.json({ report: rawContent });
+    return res.json({ report: raw });
+
   } catch (error) {
     console.error("❌ Erreur analyse-ai :", error);
     return res.status(500).json({
       error: "Erreur analyse IA",
-      details: error?.message || String(error),
+      details: error.message,
     });
   }
 });
 
 // ==========================================================
+// SERVER START
+// ==========================================================
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Inspecteur Sécurité API active sur port ${PORT}`);
 });
