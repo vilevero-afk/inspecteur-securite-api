@@ -4,7 +4,8 @@ const cors = require("cors");
 const bodyParser = require("body-parser");
 const OpenAI = require("openai");
 
-const { getPrompt } = require("./prompts");
+const { getPrompt } = require("./prompts/index.js");
+console.log("✅ typeof getPrompt =", typeof getPrompt);
 
 const app = express();
 app.use(cors());
@@ -18,7 +19,7 @@ const client = new OpenAI({
 });
 
 // ==========================================================
-// ROUTE HEALTHCHECK (RENDER / DEBUG)
+// ROUTE HEALTHCHECK
 // ==========================================================
 app.get("/health", (req, res) => {
   res.json({
@@ -31,7 +32,7 @@ app.get("/health", (req, res) => {
 });
 
 // ==========================================================
-// ROUTE UNIQUE — ANALYSE IA
+// ROUTE ANALYSE IA
 // ==========================================================
 app.post("/analyse-ai", async (req, res) => {
   try {
@@ -42,49 +43,13 @@ app.post("/analyse-ai", async (req, res) => {
       answers = {},
     } = req.body;
 
-    const cleanContext = String(context).trim();
-    const cleanRequest = String(request).trim();
-
-    // ------------------------------------------------------
-    // LOGS DEBUG (À CONSERVER)
-    // ------------------------------------------------------
-    console.log("📥 /analyse-ai");
-    console.log("   analysisType:", analysisType);
-    console.log("   context length:", cleanContext.length);
-    console.log("   request length:", cleanRequest.length);
-    console.log("   answers keys:", Object.keys(answers || {}));
-
-    // ------------------------------------------------------
-    // VALIDATIONS MÉTIER
-    // ------------------------------------------------------
-    if (analysisType === "hse_full" && cleanRequest.length < 10) {
-      return res.status(400).json({
-        error: "Demande HSE insuffisante",
-      });
-    }
-
-    if (
-      analysisType === "kinney" &&
-      (cleanContext.length < 20 || cleanRequest.length < 20)
-    ) {
-      return res.status(400).json({
-        error: "Contexte ou demande Kinney insuffisante",
-      });
-    }
-
-    // ------------------------------------------------------
-    // CONSTRUCTION DU PROMPT
-    // ------------------------------------------------------
     const prompt = getPrompt({
       analysisType,
-      context: cleanContext,
-      request: cleanRequest,
+      context: String(context).trim(),
+      request: String(request).trim(),
       answers,
     });
 
-    // ------------------------------------------------------
-    // APPEL OPENAI
-    // ------------------------------------------------------
     const completion = await client.chat.completions.create({
       model: "gpt-4o",
       messages: [{ role: "user", content: prompt }],
@@ -93,41 +58,11 @@ app.post("/analyse-ai", async (req, res) => {
 
     const rawContent = completion.choices[0].message.content;
 
-    // ------------------------------------------------------
-    // MODE KINNEY — JSON STRICT
-    // ------------------------------------------------------
     if (analysisType === "kinney") {
-      let parsed;
-
-      try {
-        parsed = JSON.parse(rawContent);
-      } catch (err) {
-        console.error("❌ Réponse Kinney NON JSON :", rawContent);
-        return res.status(500).json({
-          error: "Réponse Kinney non conforme (JSON attendu)",
-        });
-      }
-
-      if (
-        parsed.method !== "KINNEY" ||
-        !Array.isArray(parsed.risks)
-      ) {
-        return res.status(500).json({
-          error: "Structure JSON Kinney invalide",
-        });
-      }
-
-      return res.json({
-        report: parsed,
-      });
+      return res.json({ report: JSON.parse(rawContent) });
     }
 
-    // ------------------------------------------------------
-    // AUTRES MODES (QUESTIONNAIRE / HSE)
-    // ------------------------------------------------------
-    return res.json({
-      report: rawContent,
-    });
+    return res.json({ report: rawContent });
   } catch (error) {
     console.error("❌ Erreur analyse-ai :", error);
     return res.status(500).json({
@@ -137,8 +72,6 @@ app.post("/analyse-ai", async (req, res) => {
   }
 });
 
-// ==========================================================
-// SERVER START (RENDER COMPATIBLE)
 // ==========================================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
