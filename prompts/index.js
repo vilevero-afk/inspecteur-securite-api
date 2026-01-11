@@ -4,30 +4,80 @@ const { buildKinneyPrompt } = require("./kinney.prompt.js");
 const { buildQuestionnairePrompt } = require("./questionnaire.prompt.js");
 const { buildHseDocumentPrompt } = require("./hse_document.prompt.js");
 
+// ==========================================================
+// ROUTEUR DE PROMPTS IA
+// ==========================================================
 function getPrompt({ analysisType, context, request, answers }) {
+  // 🔍 LOG DEBUG (utile sur Render)
+  console.log("🧠 getPrompt appelé avec :", {
+    analysisType,
+    hasContext: !!context,
+    hasRequest: !!request,
+    answersKeys: answers ? Object.keys(answers) : [],
+  });
+
+  // =======================
+  // KINNEY
+  // =======================
   if (analysisType === "kinney") {
-    return buildKinneyPrompt(context, request);
+    if (typeof buildKinneyPrompt !== "function") {
+      throw new Error("buildKinneyPrompt n'est pas une fonction");
+    }
+
+    return buildKinneyPrompt(
+      String(context ?? "").trim(),
+      String(request ?? "").trim()
+    );
   }
 
+  // =======================
+  // QUESTIONNAIRE
+  // =======================
   if (analysisType === "questionnaire") {
-    return buildQuestionnairePrompt(context, answers);
+    if (typeof buildQuestionnairePrompt !== "function") {
+      throw new Error("buildQuestionnairePrompt n'est pas une fonction");
+    }
+
+    return buildQuestionnairePrompt(
+      String(context ?? "").trim(),
+      answers ?? {}
+    );
   }
 
+  // =======================
+  // HSE DOCUMENT COMPLET
+  // =======================
   if (analysisType === "hse_full") {
-    return buildHseDocumentPrompt(context, request);
+    if (typeof buildHseDocumentPrompt !== "function") {
+      throw new Error("buildHseDocumentPrompt n'est pas une fonction");
+    }
+
+    return buildHseDocumentPrompt(
+      String(context ?? "").trim(),
+      String(request ?? "").trim()
+    );
   }
 
-  // fallback
+  // =======================
+  // FALLBACK SÉCURISÉ
+  // =======================
+  console.warn("⚠️ analysisType inconnu, fallback utilisé :", analysisType);
+
   return `
-Contexte :
-${context}
+CONTEXTE :
+${String(context ?? "").trim()}
 
-Requête :
-${request}
+REQUÊTE :
+${String(request ?? "").trim()}
 
-Réponses :
-${JSON.stringify(answers, null, 2)}
+RÉPONSES :
+${JSON.stringify(answers ?? {}, null, 2)}
 `;
 }
 
-module.exports = { getPrompt };
+// ==========================================================
+// EXPORT
+// ==========================================================
+module.exports = {
+  getPrompt,
+};
