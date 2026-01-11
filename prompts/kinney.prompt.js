@@ -23,6 +23,15 @@ Réaliser une analyse de risques STRICTEMENT selon la méthode KINNEY (P × F ×
   - 70 – 200 : SUBSTANTIEL (actions urgentes)
   - > 200 : INTOLÉRABLE (arrêt immédiat de la situation dangereuse)
 
+📊 RÈGLES DE COHÉRENCE GLOBALE :
+- "globalRiskScore" doit correspondre au SCORE LE PLUS ÉLEVÉ parmi tous les risques analysés
+- "globalRiskLevel" doit correspondre au niveau associé à ce score maximal
+
+👥 RESPONSABILITÉS :
+- Le champ "responsible" doit toujours contenir un RÔLE ou une FONCTION
+- Ne jamais utiliser de noms propres
+- Exemples acceptés : "Employeur", "Maintenance", "Responsable HSE", "Encadrement", "Ligne hiérarchique"
+
 📌 CONTEXTE DE TRAVAIL :
 ${context}
 
